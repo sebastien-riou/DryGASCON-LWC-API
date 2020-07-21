@@ -1,0 +1,6 @@
+[submodule "submodules/github/DryGASCON"]
+	path = submodules/github/DryGASCON
+	url = git@github.com:sebastien-riou/DryGASCON.git
+[submodule "submodules/github/LWC"]
+	path = submodules/github/LWC
+	url = git@github.com:GMUCERG/LWC.git
