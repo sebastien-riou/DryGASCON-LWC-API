@@ -4,7 +4,7 @@ set DRYGASCON_PATH [file normalize [subst "$ROOT_PATH/submodules/github/DryGASCO
 set LWC_PATH       [file normalize [subst "$ROOT_PATH/submodules/github/LWC"]]
 
 set src_rtl [subst {
-    "$DRYGASCON_PATH/Implementations/crypto_aead/drygascon128/add_verilog/drygascon128_1round_cycle/drygascon128_ACC_PIPE_MIX_SHIFT_REG.v"
+    "$DRYGASCON_PATH/Implementations/crypto_aead/drygascon128/add_verilog/drygascon128_1round_cycle/drygascon128_ACC_PIPE_MIX_SHIFT_REG.v"    
     "$RTL_PATH/gascon_round.v"
     "$RTL_PATH/drygascon256.v"
     "$RTL_PATH/design_pkg.vhd"

@@ -27,6 +27,7 @@ proc prep_work {} {
 # Incremental compilation
 proc incr_compile {lib files} {
     puts "\[incr_compile\] Start ..."
+    global RTL_PATH
     global LAST_COMPILE_TIME
     puts "==Last compile time $LAST_COMPILE_TIME"
     foreach file $files {
@@ -46,8 +47,8 @@ proc incr_compile {lib files} {
                 puts "vcom -quiet -work $lib $file"
                 vcom -quiet -work $lib $file
             } else {
-                puts "vlog +define+SIMULATION -quiet -work $lib $file"
-                vlog  +define+SIMULATION -quiet -work $lib $file
+                puts "vlog +define+SIMULATION +incdir+$RTL_PATH -quiet -work $lib $file"
+                vlog  +define+SIMULATION +incdir+$RTL_PATH -quiet -work $lib $file
             }
         } else {
             puts "  Skipping $file"
