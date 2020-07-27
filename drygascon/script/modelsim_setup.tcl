@@ -8,7 +8,7 @@ if [catch {set LAST_COMPILE_TIME}] {
 # Default values
 namespace eval ns {
   variable LIB_DIR     ./libs
-  variable WORK_LIB    [subst $LIB_DIR/work]  
+  variable WORK_LIB    [subst $LIB_DIR/work]
 }
 
 proc ensure_lib { lib } { if ![file isdirectory $lib] { vlib $lib} }
@@ -30,21 +30,24 @@ proc incr_compile {lib files} {
     global LAST_COMPILE_TIME
     puts "==Last compile time $LAST_COMPILE_TIME"
     foreach file $files {
+        if [regexp {.vh$} $file] {
+          puts "Skipped $file (package file)"
+          continue
+        }
         # Extract entity name
         regexp {\w+} [file tail $file] matched
         set entity_name $matched
         # Get last compilation time
         set lastmod [file mtime $file]
-        # Compile if file is modified or not exist in workspace
-        if {$LAST_COMPILE_TIME < $lastmod || [catch {vdir $matched}]} {
+        
+        # Compile if file is modified
+        if {$LAST_COMPILE_TIME < $lastmod} {
             if [regexp {.vhdl?$} $file] {
                 puts "vcom -quiet -work $lib $file"
                 vcom -quiet -work $lib $file
-            } elseif [regexp {.vh$} $file] {
-                puts "Skipped $file (package file)"
             } else {
-                puts "vlog -quiet -work $lib $file"
-                vlog -quiet -work $lib $file
+                puts "vlog +define+SIMULATION -quiet -work $lib $file"
+                vlog  +define+SIMULATION -quiet -work $lib $file
             }
         } else {
             puts "  Skipping $file"
@@ -71,15 +74,21 @@ alias uu {
     clean_work
 }
 
-alias cc {    
+alias cc {
     puts "incr_compile $ns::WORK_LIB [concat $src_rtl $src_tb]"
     incr_compile $ns::WORK_LIB [concat $src_rtl $src_tb]
 }
 
 alias sim {
-    vsim -gui -t ps -L work lwc_tb
+    vsim -gui -t ps -L work -gG_FNAME_PDI="KAT/pdi.txt" -gG_FNAME_SDI="KAT/sdi.txt" -gG_FNAME_DO="KAT/do.txt" lwc_tb
+    do wave.do
+    run 1000 ns
 }
 
+alias r {
+    cc
+    sim
+}
 
 # Preparing the library
 if {(![file isdirectory $ns::LIB_DIR] || ![file isdirectory $ns::WORK_LIB])} {
