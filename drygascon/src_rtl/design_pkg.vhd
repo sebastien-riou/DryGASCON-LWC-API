@@ -84,8 +84,8 @@ package body Design_pkg is
 
 
     --! design parameters needed by the PreProcessor, PostProcessor, and LWC
-    constant TAG_SIZE        : integer := 256; --! Tag size
-    constant HASH_VALUE_SIZE : integer := 256; --! Hash value size
+    constant TAG_SIZE        : integer := 128; --! Tag size
+    constant HASH_VALUE_SIZE : integer := 128; --! Hash value size
     constant CCW             : integer := vector_of_constants(1); --! bdo/bdi width
     constant CCSW            : integer := vector_of_constants(2); --! key width
     constant CCWdiv8         : integer := CCW/8; -- derived from parameters above

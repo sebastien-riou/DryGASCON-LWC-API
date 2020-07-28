@@ -3,10 +3,10 @@
 
 module gascon_round
 #(
-    parameter NW              = 9     // DRYSPONGE_CAPACITYSIZE64
+    parameter NW              = 5     // DRYSPONGE_CAPACITYSIZE64
 ) (
     input  wire [64*NW-1:0] din,
-    input  wire [4                          -1:0] round,
+    input  wire [4    -1:0] round,
     output wire [64*NW-1:0] out
 );
 

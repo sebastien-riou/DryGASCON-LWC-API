@@ -41,7 +41,7 @@ end CryptoCore;
 
 architecture behavioral of CryptoCore is
 
-    component gascon256
+    component drygascon
         generic (
             CCW             : integer := 32;
             CCWdiv8         : integer := 8;
@@ -79,11 +79,11 @@ architecture behavioral of CryptoCore is
             msg_auth_ready  : in   STD_LOGIC;
             msg_auth        : out  STD_LOGIC
         );
-    end component gascon256;
+    end component drygascon;
 
 begin
 
-    u_core: gascon256
+    u_core: drygascon
     generic map (
         CCW             => CCW      ,
         CCWdiv8         => CCWdiv8  ,
