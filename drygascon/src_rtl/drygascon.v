@@ -3,7 +3,7 @@
 
 module drygascon #(
     parameter                   CCW         = 32,
-    parameter                   CCWdiv8     = 8 ,
+    parameter                   CCWdiv8     = 4 ,
     parameter                   CCSW        = 32
 ) (
     input wire                  clk             ,
@@ -93,6 +93,7 @@ reg         [2          -1:0]   sel_c;
 reg                             sel_x;
 reg                             do_mix;
 reg                             sel_tag;
+reg                             sel_pad;
 
 // ========= encoding
 localparam                      HDR_AD          = 4'b0001;
@@ -110,7 +111,8 @@ localparam                      S_DI_INIT       = 0;
 localparam                      S_DI_KEYCHK     = 1;
 localparam                      S_DI_LDKEY      = 2;
 localparam                      S_DI_LD         = 3;
-localparam                      S_DI_WAIT       = 4;
+localparam                      S_DI_PAD        = 4;
+localparam                      S_DI_WAIT       = 5;
 
 
 reg         [4          -1:0]   st_di;
@@ -168,7 +170,7 @@ wire        [WIDTH_DATA+4   -1:0]   ds_data; // {DSINFO, data}
 wire        [WIDTH_DATA     -1:0]   dout;
 reg         [D_WIDTH        -1:0]   dd;
 
-assign pad = 0;
+assign pad = ~r_bdi_valid_bytes[0];
 assign final_domain = r_bdi_eoi;
 assign dsinfo = {pad, final_domain, domain};
 assign gascon_in = (do_mix) ? mix_out : cc;
@@ -392,9 +394,23 @@ end // FSM Core
 // -------------------------------------------------------------------
 // FSM Input
 // -------------------------------------------------------------------
+wire [CCW-1:0] bdi_pad;
+
+
 assign key_ready = key_rdy;
 assign bdi_ready = bdi_rdy;
 assign data_rdy = (st_di == S_DI_WAIT) ? 1:0;
+
+// Input padding logic
+genvar i;
+generate
+    for (i=0; i<CCWdiv8; i=i+1) begin
+        assign bdi_pad[CCW-8*(i+1) +: 8] =
+                               (sel_pad) ? 0 :
+            (bdi_pad_loc[CCWdiv8-(i+1)]) ? 1 :
+            (bdi[CCW-8*(i+1) +: 8] & {8{bdi_valid_bytes[CCWdiv8-(i+1)]}});
+    end
+endgenerate
 
 always @(posedge clk) begin
     if (rst_cnt_di)
@@ -402,8 +418,12 @@ always @(posedge clk) begin
     else if (ena_cnt_di)
         cnt_di <= cnt_di + 1;
 
-    if (ena_data) begin
-        r_data              <= {r_data[WIDTH_DATA-CCW-1:0], bdi};
+    if (ena_data)
+        r_data   <= {r_data[WIDTH_DATA-CCW-1:0], bdi_pad};
+
+
+    if (st_di == S_DI_LD && ena_data) begin
+
         r_bdi_type          <= bdi_type;
         r_bdi_eoi           <= bdi_eoi;
         r_bdi_eot           <= bdi_eot;
@@ -430,6 +450,7 @@ begin
     ena_data     <= 0;
     bdi_rdy      <= 0;
     key_rdy      <= 0;
+    sel_pad      <= 0;
 
     case (st_di)
     S_DI_INIT: begin       // Initialization
@@ -461,15 +482,28 @@ begin
         if (bdi_valid) begin
             ena_data   <= 1;
             bdi_rdy <= 1;
-            if ((bdi_type == HDR_NPUB)
-                    && (cnt_di == WORD_NPUB-1))
-                nst_di <= S_DI_WAIT;
-            else if ((bdi_type == HDR_PT || bdi_type == HDR_CT || bdi_type == HDR_TAG)
-                        && (cnt_di == WORD_DATA-1))
-                nst_di <= S_DI_WAIT;
-            else
-                ena_cnt_di <= 1;
+            if (bdi_valid_bytes[0]) begin
+                if ((bdi_type == HDR_NPUB)
+                        && (cnt_di == WORD_NPUB-1))
+                    nst_di <= S_DI_WAIT;
+                else if ((bdi_type == HDR_PT || bdi_type == HDR_CT || bdi_type == HDR_TAG)
+                            && (cnt_di == WORD_DATA-1))
+                    nst_di <= S_DI_WAIT;
+                else
+                    ena_cnt_di <= 1;
+            end else begin
+                ena_cnt_di  <= 1;
+                nst_di      <= S_DI_PAD;
+            end
         end
+    end
+
+    S_DI_PAD: begin
+        sel_pad    <= 1;
+        ena_cnt_di <= 1;
+        ena_data   <= 1;
+        if (cnt_di == WORD_DATA-1)
+            nst_di <= S_DI_WAIT;
     end
 
     S_DI_WAIT: begin
@@ -487,10 +521,8 @@ end
 // -------------------------------------------------------------------
 // FSM Output
 // -------------------------------------------------------------------
-reg msg_auth_vld;
-
-
-reg bdo_vld;
+reg  msg_auth_vld;
+reg  bdo_vld;
 wire last;
 
 assign bdo             = r_dout[128-32 +: 32];
@@ -555,7 +587,6 @@ wire        [32         -1:0]   dbg_rr[0:3];
 wire        [32         -1:0]   dbg_data[0:3];
 wire        [32         -1:0]   dbg_dout[0:3];
 
-genvar i;
 generate
     for (i=0; i<NW; i=i+1) begin: g_dbg_cc
         assign dbg_cc[i] = cc[WIDTH_C-i*64-1 -: 64];
