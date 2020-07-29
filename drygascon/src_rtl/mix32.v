@@ -12,14 +12,11 @@ module mix32
     output wire [64*CW-1:0]   out
 );
 
-`include "utils.vh"
-
 wire [64-1:0] cc                [0:CW-1];
 wire [64-1:0] oo                [0:CW-1];
 wire [2 -1:0] idx               [0:CW-1];
 wire [32-1:0] xx                [0:XW32-1];
 reg  [32-1:0] xw                [0:CW-1];
-
 
 genvar i;
 generate
