@@ -40,7 +40,7 @@ proc incr_compile {lib files} {
         set entity_name $matched
         # Get last compilation time
         set lastmod [file mtime $file]
-        
+
         # Compile if file is modified
         if {$LAST_COMPILE_TIME < $lastmod} {
             if [regexp {.vhdl?$} $file] {
@@ -83,7 +83,7 @@ alias cc {
 alias sim {
     vsim -gui -t ps -L work -gG_FNAME_PDI="KAT/pdi.txt" -gG_FNAME_SDI="KAT/sdi.txt" -gG_FNAME_DO="KAT/do.txt" lwc_tb
     do wave.do
-    run 1000 ns
+    run $RUN_TIME
 }
 
 alias r {

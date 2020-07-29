@@ -171,8 +171,9 @@ wire        [WIDTH_DATA     -1:0]   dout;
 reg         [D_WIDTH        -1:0]   dd;
 
 assign pad = ~r_bdi_valid_bytes[0];
-assign final_domain = r_bdi_eoi;
-assign dsinfo = {pad, final_domain, domain};
+// assign final_domain = r_bdi_eoi;
+assign final_domain = (r_bdi_type == HDR_HASH_MSG) ? 1 : r_bdi_eoi;  // temporary work around. r_bdi_eoi is not behaving as intended
+assign dsinfo = {domain, final_domain, pad};
 assign gascon_in = (do_mix) ? mix_out : cc;
 
 
@@ -202,8 +203,8 @@ end
 
 always @(*) begin     // DOMAIN
     case(r_bdi_type)
-        HDR_HASH_MSG: domain <= 1;
-        HDR_NPUB: domain <= 2;
+        HDR_NPUB: domain <= 1;
+        HDR_HASH_MSG: domain <= 2;
         HDR_AD  : domain <= 2;
         default:  domain <= 3;
     endcase
@@ -230,6 +231,7 @@ assign accu_out = accu_p1 ^ accu_p2 ^ rr;
 reg         [WIDTH_DATA     -1:0]   r_dout;
 reg         [2              -1:0]   r_dout_words;
 reg         [CCWdiv8        -1:0]   r_dout_bytes;
+reg                                 r_dout_end;
 reg         [4              -1:0]   r_gascon_rounds;
 reg                                 r_msg_auth;
 reg                                 data_end;
@@ -237,7 +239,8 @@ reg         [2              -1:0]   data_size;
 
 reg                                 dout_vld;
 reg                                 dout_rdy;
-reg                                 flag_tagchk;
+reg                                 flag_tag_check;
+reg                                 r_flag_squeeze;
 
 
 always @(posedge clk) begin
@@ -255,10 +258,13 @@ always @(posedge clk) begin
         case (sel_c)
             0: cc <= gascon_out;
             1: cc <= mix_out;
-            3: cc <= {r_key[WIDTH_KEY-DRYSPONGE_KEYSIZE*8 +: DRYSPONGE_KEYSIZE*8],
+            2: cc <= {r_key[WIDTH_KEY-DRYSPONGE_KEYSIZE*8 +: DRYSPONGE_KEYSIZE*8],
                       r_key[WIDTH_KEY-DRYSPONGE_KEYSIZE*8 +: DRYSPONGE_KEYSIZE*8],
                       r_key[WIDTH_KEY-64 +: 64]};
-            default: cc <= 0;   // unused -- placeholder
+            3: cc <= {{128'h243F6A8885A308D313198A2E03707344},
+                      {128'h243F6A8885A308D313198A2E03707344},
+                      { 64'h243F6A8885A308D3}};
+            default: cc <= 0; // shouldn't be happening
         endcase
     end
 
@@ -269,21 +275,22 @@ always @(posedge clk) begin
 
     if (ena_x) begin
         case (sel_x)
-            0: xx <= 0;
-            1: xx <= r_key[WIDTH_KEY-DRYSPONGE_KEYSIZE*8-WIDTH_X +: WIDTH_X];
+            0: xx <= r_key[WIDTH_KEY-DRYSPONGE_KEYSIZE*8-WIDTH_X +: WIDTH_X];
+            1: xx <= {128'hA4093822299F31D0082EFA98EC4E6C89};
         endcase
     end
 
     if (data_vld) begin
-        data_end  <= r_bdi_eoi;
+        data_end  <= final_domain;
         data_size <= cnt_di;
     end
 
 
     if (dout_vld && dout_rdy) begin
         r_dout       <= (sel_tag) ? rr : dout;
-        r_dout_words <= data_size;
+        r_dout_words <= (r_msg_hash) ? 3 : data_size;
         r_dout_bytes <= r_bdi_valid_bytes;
+        r_dout_end   <= (r_msg_hash) ? r_flag_squeeze : data_end;
     end else if (ena_dout) begin
         r_dout <= r_dout << CCW;
         r_dout_words <= r_dout_words - 1;
@@ -297,9 +304,13 @@ always @(posedge clk) begin
         r_msg_hash      <= r_hash_in;
     end
 
-    if (flag_tagchk)
+    if (flag_tag_check)
         r_msg_auth <= (rr == r_data) ? 1:0;
 
+    if (state == S_INIT)
+        r_flag_squeeze <= 0;
+    else if ((state == S_TAG_OUT) & dout_vld)
+        r_flag_squeeze <= 1;
 end
 
 // FSM Core
@@ -320,7 +331,7 @@ begin
     data_vld <= 0;
     do_mix   <= 0;
     dout_vld <= 0;
-    flag_tagchk <= 0;
+    flag_tag_check <= 0;
 
     // output
     sel_tag  <= 0;
@@ -335,11 +346,10 @@ begin
 
     S_KS: begin
         ena_c  <= 1;
-        sel_c  <= 3;
-        // sel_g  <= 1;
+        sel_c  <= (r_hash_in) ? 3:2;
 
         ena_x <= 1;
-        sel_x <= 1;
+        sel_x <= (r_hash_in) ? 1:0;
         nstate <= S_MIX;
     end
 
@@ -375,11 +385,19 @@ begin
 
     S_TAG_OUT: begin
         sel_tag <= 1;
-        if (!r_msg_decrypt & dout_rdy) begin    // encrypt
+        if (r_msg_hash & dout_rdy) begin
+            dout_vld <= 1;
+            if (r_flag_squeeze) begin
+                nstate <= S_INIT;
+            end else begin
+                rst_r  <= 1;
+                nstate <= S_GASCON; // perform second squeeze
+            end
+        end else if (!r_msg_decrypt & dout_rdy) begin    // encrypt
             dout_vld <= 1;
             nstate      <= S_INIT;
         end else if (r_msg_decrypt & data_rdy & dout_rdy) begin
-            flag_tagchk <= 1;
+            flag_tag_check <= 1;
             data_vld    <= 1;
             nstate      <= S_INIT;
         end
@@ -423,7 +441,6 @@ always @(posedge clk) begin
 
 
     if (st_di == S_DI_LD && ena_data) begin
-
         r_bdi_type          <= bdi_type;
         r_bdi_eoi           <= bdi_eoi;
         r_bdi_eot           <= bdi_eot;
@@ -528,11 +545,11 @@ wire last;
 assign bdo             = r_dout[128-32 +: 32];
 assign bdo_valid       = bdo_vld;
 assign bdo_type        = "0000"; // not implemented. unused feature. See LWC implementer's guide.
-assign bdo_valid_bytes = (last) ? r_dout_bytes : {4'b1111};
+assign bdo_valid_bytes = (last & !r_msg_hash) ? r_dout_bytes : {4'b1111};
 assign end_of_block    = last;
 assign msg_auth_valid  = msg_auth_vld;
 assign msg_auth        = r_msg_auth;
-assign last            = (data_end && (r_dout_words == 0)) ? 1:0;
+assign last            = (r_dout_end && (r_dout_words == 0)) ? 1:0;
 
 always @(posedge clk) begin
     if (rst)
@@ -551,7 +568,7 @@ always @(*) begin
     case (st_do)
     S_DO_WAIT: begin
         dout_rdy <= 1;
-        if (flag_tagchk)
+        if (flag_tag_check)
             nst_do <= S_DO_MSGAUTH;
         else if (dout_vld)
             nst_do <= S_DO_OUT;

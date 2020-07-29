@@ -24,7 +24,7 @@ package Design_pkg is
 
     --! Select variant
     constant variant : set_selector := dummy_lwc_32;
-    
+
     --! Adjust the bit counter widths to reduce ressource consumption.
     -- Range definition must not change.
     constant AD_CNT_WIDTH    : integer range 4 to 64 := 32;  --! Width of AD Bit counter
@@ -36,7 +36,7 @@ package Design_pkg is
     --! design parameters needed by the PreProcessor, PostProcessor, and LWC; assigned in the package body below!
     constant TAG_SIZE        : integer; --! Tag size
     constant HASH_VALUE_SIZE : integer; --! Hash value size
-    
+
     constant CCSW            : integer; --! variant dependent design parameter!
     constant CCW             : integer; --! variant dependent design parameter!
     constant CCWdiv8         : integer; --! derived from parameters above, assigned in body.
@@ -48,7 +48,7 @@ package Design_pkg is
 
     --! place declarations of your functions here
     --! Calculate the number of I/O words for a particular size
-    function get_words(size: integer; iowidth:integer) return integer; 
+    function get_words(size: integer; iowidth:integer) return integer;
     --! Calculate log2 and round up.
     function log2_ceil (N: natural) return natural;
     --! Reverse the Byte order of the input word.
@@ -85,7 +85,7 @@ package body Design_pkg is
 
     --! design parameters needed by the PreProcessor, PostProcessor, and LWC
     constant TAG_SIZE        : integer := 128; --! Tag size
-    constant HASH_VALUE_SIZE : integer := 128; --! Hash value size
+    constant HASH_VALUE_SIZE : integer := 256; --! Hash value size
     constant CCW             : integer := vector_of_constants(1); --! bdo/bdi width
     constant CCSW            : integer := vector_of_constants(2); --! key width
     constant CCWdiv8         : integer := CCW/8; -- derived from parameters above
