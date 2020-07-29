@@ -120,16 +120,21 @@ reg         [4          -1:0]   nst_di;
 // ========= Output
 localparam                      S_DO_WAIT       = 0;
 localparam                      S_DO_OUT        = 1;
-reg         [1          -1:0]   st_do;
-reg         [1          -1:0]   nst_do;
+localparam                      S_DO_MSGAUTH    = 2;
+reg         [2          -1:0]   st_do;
+reg         [2          -1:0]   nst_do;
 
-// Continue
 reg         [WIDTH_KEY  -1:0]   r_key;
 reg         [WIDTH_DATA -1:0]   r_data;
 reg         [4          -1:0]   r_bdi_type;
 reg                             r_bdi_eot;
 reg                             r_bdi_eoi;
 reg         [CCWdiv8    -1:0]   r_bdi_valid_bytes;
+// reg         [CCWdiv8    -1:0]   r_bdi_valid_bytes;
+reg                             r_decrypt_in;
+reg                             r_hash_in;
+reg                             r_msg_decrypt;
+reg                             r_msg_hash;
 
 reg         [4          -1:0]   cnt_di;
 
@@ -224,11 +229,14 @@ reg         [WIDTH_DATA     -1:0]   r_dout;
 reg         [2              -1:0]   r_dout_words;
 reg         [CCWdiv8        -1:0]   r_dout_bytes;
 reg         [4              -1:0]   r_gascon_rounds;
+reg                                 r_msg_auth;
 reg                                 data_end;
 reg         [2              -1:0]   data_size;
 
 reg                                 dout_vld;
 reg                                 dout_rdy;
+reg                                 flag_tagchk;
+
 
 always @(posedge clk) begin
     if (rst)
@@ -279,10 +287,16 @@ always @(posedge clk) begin
         r_dout_words <= r_dout_words - 1;
     end
 
-
-
     if (state == S_MIX)
         r_gascon_rounds <= (do_mix && (r_bdi_type == HDR_NPUB)) ? DRYSPONGE_INIT_ROUNDS : DRYSPONGE_ROUNDS;
+
+    if (state == S_INIT) begin
+        r_msg_decrypt   <= r_decrypt_in;
+        r_msg_hash      <= r_hash_in;
+    end
+
+    if (flag_tagchk)
+        r_msg_auth <= (rr == r_data) ? 1:0;
 
 end
 
@@ -304,6 +318,7 @@ begin
     data_vld <= 0;
     do_mix   <= 0;
     dout_vld <= 0;
+    flag_tagchk <= 0;
 
     // output
     sel_tag  <= 0;
@@ -358,9 +373,13 @@ begin
 
     S_TAG_OUT: begin
         sel_tag <= 1;
-        if (dout_rdy) begin
+        if (!r_msg_decrypt & dout_rdy) begin    // encrypt
             dout_vld <= 1;
-            nstate   <= S_INIT;
+            nstate      <= S_INIT;
+        end else if (r_msg_decrypt & data_rdy & dout_rdy) begin
+            flag_tagchk <= 1;
+            data_vld    <= 1;
+            nstate      <= S_INIT;
         end
     end
 
@@ -389,6 +408,8 @@ always @(posedge clk) begin
         r_bdi_eoi           <= bdi_eoi;
         r_bdi_eot           <= bdi_eot;
         r_bdi_valid_bytes   <= bdi_valid_bytes;
+        r_decrypt_in        <= decrypt_in;
+        r_hash_in           <= hash_in;
     end
 
     if (ena_key)
@@ -440,29 +461,24 @@ begin
         if (bdi_valid) begin
             ena_data   <= 1;
             bdi_rdy <= 1;
-            if ((bdi_type == HDR_NPUB) &&
-                (cnt_di == WORD_NPUB-1))
-            begin
-
+            if ((bdi_type == HDR_NPUB)
+                    && (cnt_di == WORD_NPUB-1))
                 nst_di <= S_DI_WAIT;
-            end else if ((bdi_type == HDR_PT || bdi_type == HDR_CT) &&
-                         (cnt_di == WORD_DATA-1))
-            begin
+            else if ((bdi_type == HDR_PT || bdi_type == HDR_CT || bdi_type == HDR_TAG)
+                        && (cnt_di == WORD_DATA-1))
                 nst_di <= S_DI_WAIT;
-            end else begin
+            else
                 ena_cnt_di <= 1;
-            end
         end
     end
 
     S_DI_WAIT: begin
-        if (dout_vld) begin
+        if (data_vld) begin
             rst_cnt_di <= 1;
-            if (r_bdi_eoi) begin
+            if ((r_bdi_eoi & !r_decrypt_in) || (r_bdi_type == HDR_TAG))
                 nst_di <= S_DI_INIT;
-            end else begin
+            else
                 nst_di <= S_DI_LD;
-            end
         end
     end
     endcase
@@ -483,7 +499,7 @@ assign bdo_type        = "0000"; // not implemented. unused feature. See LWC imp
 assign bdo_valid_bytes = (last) ? r_dout_bytes : {4'b1111};
 assign end_of_block    = last;
 assign msg_auth_valid  = msg_auth_vld;
-assign msg_auth        = (rr == r_data) ? 1:0;
+assign msg_auth        = r_msg_auth;
 assign last            = (data_end && (r_dout_words == 0)) ? 1:0;
 
 always @(posedge clk) begin
@@ -503,7 +519,9 @@ always @(*) begin
     case (st_do)
     S_DO_WAIT: begin
         dout_rdy <= 1;
-        if (dout_vld)
+        if (flag_tagchk)
+            nst_do <= S_DO_MSGAUTH;
+        else if (dout_vld)
             nst_do <= S_DO_OUT;
     end
 
@@ -514,6 +532,12 @@ always @(*) begin
             if (r_dout_words == 0)
                 nst_do <= S_DO_WAIT;
         end
+    end
+
+    S_DO_MSGAUTH: begin
+        msg_auth_vld <= 1;
+        if (msg_auth_ready)
+            nst_do <= S_DO_WAIT;
     end
     endcase
 end
@@ -528,6 +552,7 @@ wire        [64         -1:0]   dbg_mixout[0:NW-1];
 wire        [64         -1:0]   dbg_gasconi[0:NW-1];
 wire        [64         -1:0]   dbg_gascono[0:NW-1];
 wire        [32         -1:0]   dbg_rr[0:3];
+wire        [32         -1:0]   dbg_data[0:3];
 wire        [32         -1:0]   dbg_dout[0:3];
 
 genvar i;
@@ -543,6 +568,7 @@ generate
     for (i=0; i<4; i=i+1) begin: g_dbg_rr
         assign dbg_rr[i] = rr[128-i*32-1 -: 32];
         assign dbg_dout[i]  = r_dout[128-i*32-1 -: 32];
+        assign dbg_data[i]  = r_data[128-i*32-1 -: 32];
     end
 endgenerate
 `endif
