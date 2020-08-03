@@ -67,11 +67,11 @@ localparam                      WIDTH_C                 = 64*NW;
 localparam                      WIDTH_X                 = 128;
 localparam                      WIDTH_STATE             = 3;
 localparam                      S_INIT                  = 0;
-// localparam                      S_KS_INIT                   = 1;
-localparam                      S_KS                    = 2;
-localparam                      S_MIX                   = 3;
-localparam                      S_GASCON                = 4;
-localparam                      S_TAG_OUT               = 5;
+localparam                      S_KS                    = 1;
+localparam                      S_MIX                   = 2;
+localparam                      S_GASCON                = 3;
+localparam                      S_TAG_OUT               = 4;
+localparam                      S_WAIT_DATA             = 5;
 localparam                      S_WAIT                  = 6;
 
 reg         [WIDTH_C    -1:0]   cc;
@@ -118,6 +118,28 @@ localparam                      S_DI_WAIT       = 5;
 reg         [4          -1:0]   st_di;
 reg         [4          -1:0]   nst_di;
 
+reg         [WIDTH_KEY  -1:0]   r_key;
+reg         [WIDTH_DATA -1:0]   r_data;
+reg         [4          -1:0]   r_bdi_type;
+reg                             r_bdi_eot;
+reg                             r_bdi_eoi;
+reg                             r_is_msg;
+reg         [CCWdiv8    -1:0]   r_bdi_valid_bytes;
+reg         [16         -1:0]   r_bdi_valid_bytes_all; // Number of valid bytes in a block
+reg                             r_decrypt_in;
+reg                             r_hash_in;
+reg                             r_msg_decrypt;
+reg                             r_msg_hash;
+
+reg         [4          -1:0]   cnt_di;
+reg                             rst_cnt_di;
+reg                             ena_cnt_di;
+reg                             bdi_rdy;
+reg                             key_rdy;
+reg                             ena_key;
+reg                             ena_data;
+wire                            data_rdy;
+reg                             data_vld;
 
 // ========= Output
 localparam                      S_DO_WAIT       = 0;
@@ -126,49 +148,23 @@ localparam                      S_DO_MSGAUTH    = 2;
 reg         [2          -1:0]   st_do;
 reg         [2          -1:0]   nst_do;
 
-reg         [WIDTH_KEY  -1:0]   r_key;
-reg         [WIDTH_DATA -1:0]   r_data;
-reg         [4          -1:0]   r_bdi_type;
-reg                             r_bdi_eot;
-reg                             r_bdi_eoi;
-reg         [CCWdiv8    -1:0]   r_bdi_valid_bytes;
-// reg         [CCWdiv8    -1:0]   r_bdi_valid_bytes;
-reg                             r_decrypt_in;
-reg                             r_hash_in;
-reg                             r_msg_decrypt;
-reg                             r_msg_hash;
-
-reg         [4          -1:0]   cnt_di;
-
-reg                             rst_cnt_di;
-reg                             ena_cnt_di;
-reg                             ena_key;
-reg                             ena_data;
 reg                             ena_dout;
-
-reg                             key_rdy;
-reg                             bdi_rdy;
-wire                            data_rdy;
-reg                             data_vld;
-wire        [WIDTH_C    -1:0]   gascon_in;
-wire        [WIDTH_C    -1:0]   gascon_out;
-wire        [WIDTH_C    -1:0]   mix_out;
-wire        [256        -1:0]   accu_out;
-
-
-
 
 // -------------------------------------------------------------------
 // ==== Datapath
 // -------------------------------------------------------------------
-
 wire                                pad;
 wire                                final_domain;
 reg         [2              -1:0]   domain;
 wire        [4              -1:0]   dsinfo;
 wire        [WIDTH_DATA+4   -1:0]   ds_data; // {DSINFO, data}
+wire        [WIDTH_DATA     -1:0]   data_sel;
 wire        [WIDTH_DATA     -1:0]   dout;
 reg         [D_WIDTH        -1:0]   dd;
+wire        [WIDTH_C        -1:0]   gascon_in;
+wire        [WIDTH_C        -1:0]   gascon_out;
+wire        [WIDTH_C        -1:0]   mix_out;
+wire        [256            -1:0]   accu_out;
 
 assign pad = ~r_bdi_valid_bytes[0];
 // assign final_domain = r_bdi_eoi;
@@ -178,7 +174,18 @@ assign gascon_in = (do_mix) ? mix_out : cc;
 
 
 `include "utils.vh"
-assign ds_data = {dsinfo, swap_endian128(r_data)};
+genvar i;
+
+generate
+    for (i=0; i<WIDTH_DATA/8; i=i+1) begin
+        assign data_sel[WIDTH_DATA-(i+1)*8 +: 8] =
+            (r_bdi_valid_bytes_all[WIDTH_DATA/8-i-1] & r_is_msg & r_decrypt_in) ?
+            r_data[WIDTH_DATA-(i+1)*8 +: 8] ^ rr[WIDTH_DATA-(i+1)*8 +: 8] :
+            r_data[WIDTH_DATA-(i+1)*8 +: 8];
+    end
+endgenerate
+
+assign ds_data = {dsinfo, swap_endian128(data_sel)};
 
 integer ii;
 always @(*) begin         // dd mux
@@ -221,6 +228,7 @@ assign accu_p1 = gascon_out[WIDTH_C-WIDTH_DATA +: WIDTH_DATA];          // [0..3
 assign accu_p2 = {gascon_out[WIDTH_C-2*WIDTH_DATA +: WIDTH_DATA-32],    // ([4..7] <<< 32)
                   gascon_out[WIDTH_C-WIDTH_DATA-32 +: 32]};
 assign accu_out = accu_p1 ^ accu_p2 ^ rr;
+assign dout = r_data ^ rr;
 
 
 
@@ -282,15 +290,16 @@ always @(posedge clk) begin
 
     if (data_vld) begin
         data_end  <= final_domain;
-        data_size <= cnt_di;
+        // data_size <= cnt_di;
     end
 
 
     if (dout_vld && dout_rdy) begin
         r_dout       <= (sel_tag) ? rr : dout;
-        r_dout_words <= (r_msg_hash) ? 3 : data_size;
-        r_dout_bytes <= r_bdi_valid_bytes;
-        r_dout_end   <= (r_msg_hash) ? r_flag_squeeze : data_end;
+        r_dout_words <= (r_msg_hash | sel_tag) ? 3 : data_size;
+        r_dout_bytes <= (sel_tag) ? {4'b1111} : r_bdi_valid_bytes;
+        r_dout_end   <= (r_msg_hash) ?
+                            r_flag_squeeze : (r_is_msg) ? r_bdi_eot : data_end;
     end else if (ena_dout) begin
         r_dout <= r_dout << CCW;
         r_dout_words <= r_dout_words - 1;
@@ -355,7 +364,9 @@ begin
 
     S_MIX: begin
         do_mix <= 1;
-        if (data_rdy) begin
+        if (data_rdy & (!r_is_msg | dout_rdy | (rnd != 0))) begin
+            if (r_is_msg && (rnd == 0))
+                dout_vld <= 1;
             ena_c <= 1;
             if (rnd < DRYSPONGE_MPR_ROUNDS-1) begin
                 ena_rnd <= 1;
@@ -363,6 +374,7 @@ begin
                 data_vld <= 1;
                 sel_c   <= 1;
                 rst_rnd <= 1;
+                rst_r   <= 1;
                 nstate  <= S_GASCON;
             end
         end
@@ -378,8 +390,10 @@ begin
             rst_rnd <= 1;
             if (data_end)
                 nstate <= S_TAG_OUT;
+            else if (data_rdy)
+                nstate <= S_MIX;
             else
-                nstate  <= S_WAIT;
+                nstate <= S_WAIT_DATA;
         end
     end
 
@@ -394,13 +408,18 @@ begin
                 nstate <= S_GASCON; // perform second squeeze
             end
         end else if (!r_msg_decrypt & dout_rdy) begin    // encrypt
-            dout_vld <= 1;
+            dout_vld    <= 1;
             nstate      <= S_INIT;
         end else if (r_msg_decrypt & data_rdy & dout_rdy) begin
             flag_tag_check <= 1;
             data_vld    <= 1;
             nstate      <= S_INIT;
         end
+    end
+
+    S_WAIT_DATA: begin
+        if (data_rdy)
+            nstate <= S_MIX;
     end
 
     default: begin  // S_WAIT
@@ -412,15 +431,15 @@ end // FSM Core
 // -------------------------------------------------------------------
 // FSM Input
 // -------------------------------------------------------------------
-wire [CCW-1:0] bdi_pad;
-
+wire [CCW    -1:0] bdi_pad;
+wire [CCWdiv8-1:0] vbytes_sel;
 
 assign key_ready = key_rdy;
 assign bdi_ready = bdi_rdy;
 assign data_rdy = (st_di == S_DI_WAIT) ? 1:0;
+assign vbytes_sel = (sel_pad) ? 0 : bdi_valid_bytes;
 
 // Input padding logic
-genvar i;
 generate
     for (i=0; i<CCWdiv8; i=i+1) begin
         assign bdi_pad[CCW-8*(i+1) +: 8] =
@@ -430,15 +449,23 @@ generate
     end
 endgenerate
 
+
+
 always @(posedge clk) begin
-    if (rst_cnt_di)
+    if (rst_cnt_di) begin
         cnt_di <= 0;
-    else if (ena_cnt_di)
+    end else if (ena_cnt_di) begin
         cnt_di <= cnt_di + 1;
+        if (!sel_pad)
+            data_size <= cnt_di;
+        r_bdi_valid_bytes_all <= {r_bdi_valid_bytes_all[11:0], vbytes_sel};
+    end
 
     if (ena_data)
         r_data   <= {r_data[WIDTH_DATA-CCW-1:0], bdi_pad};
 
+    if (bdi_rdy)
+        r_is_msg <= (bdi_type == HDR_PT || bdi_type == HDR_CT) ? 1:0;
 
     if (st_di == S_DI_LD && ena_data) begin
         r_bdi_type          <= bdi_type;
@@ -447,6 +474,7 @@ always @(posedge clk) begin
         r_bdi_valid_bytes   <= bdi_valid_bytes;
         r_decrypt_in        <= decrypt_in;
         r_hash_in           <= hash_in;
+
     end
 
     if (ena_key)
@@ -526,7 +554,9 @@ begin
     S_DI_WAIT: begin
         if (data_vld) begin
             rst_cnt_di <= 1;
-            if ((r_bdi_eoi & !r_decrypt_in) || (r_bdi_type == HDR_TAG))
+            if ((r_bdi_eoi & !r_decrypt_in)
+                || (r_bdi_type == HDR_TAG)
+                || (r_bdi_eot & (r_bdi_type == HDR_HASH_MSG)))
                 nst_di <= S_DI_INIT;
             else
                 nst_di <= S_DI_LD;
@@ -544,11 +574,12 @@ wire last;
 
 assign bdo             = r_dout[128-32 +: 32];
 assign bdo_valid       = bdo_vld;
-assign bdo_type        = "0000"; // not implemented. unused feature. See LWC implementer's guide.
-assign bdo_valid_bytes = (last & !r_msg_hash) ? r_dout_bytes : {4'b1111};
+assign bdo_type        = "XXXX"; // not implemented. unused feature. See LWC implementer's guide.
+assign bdo_valid_bytes = r_dout_bytes;
 assign end_of_block    = last;
 assign msg_auth_valid  = msg_auth_vld;
 assign msg_auth        = r_msg_auth;
+// assign last            = (r_dout_end && (r_dout_words == 0)) ? 1:0;
 assign last            = (r_dout_end && (r_dout_words == 0)) ? 1:0;
 
 always @(posedge clk) begin
@@ -603,6 +634,12 @@ wire        [64         -1:0]   dbg_gascono[0:NW-1];
 wire        [32         -1:0]   dbg_rr[0:3];
 wire        [32         -1:0]   dbg_data[0:3];
 wire        [32         -1:0]   dbg_dout[0:3];
+wire                            dbg_mix_done;
+wire                            dbg_gascon_done;
+
+assign dbg_mix_done = ((rnd == DRYSPONGE_MPR_ROUNDS-1) && (state == S_MIX)) ? 1:0;
+assign dbg_gascon_done = ((rnd == r_gascon_rounds-1) && (state == S_GASCON)) ? 1:0;
+
 
 generate
     for (i=0; i<NW; i=i+1) begin: g_dbg_cc
