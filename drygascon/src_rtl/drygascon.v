@@ -181,7 +181,7 @@ generate
     for (i=0; i<WIDTH_DATA/8; i=i+1) begin
         assign data_sel[WIDTH_DATA-(i+1)*8 +: 8] =
             (r_bdi_valid_bytes_all[WIDTH_DATA/8-i-1] & r_is_msg & r_decrypt_in) ?
-            r_data[WIDTH_DATA-(i+1)*8 +: 8] ^ rr[WIDTH_DATA-(i+1)*8 +: 8] :
+              dout[WIDTH_DATA-(i+1)*8 +: 8] :
             r_data[WIDTH_DATA-(i+1)*8 +: 8];
     end
 endgenerate
@@ -291,7 +291,6 @@ always @(posedge clk) begin
 
     if (data_vld) begin
         data_end  <= final_domain;
-        // data_size <= cnt_di;
     end
 
 
@@ -457,13 +456,14 @@ always @(posedge clk) begin
         cnt_di <= 0;
     end else if (ena_cnt_di) begin
         cnt_di <= cnt_di + 1;
-        if (!sel_pad)
-            data_size <= cnt_di;
-        r_bdi_valid_bytes_all <= {r_bdi_valid_bytes_all[11:0], vbytes_sel};
     end
 
-    if (ena_data)
+    if (ena_data) begin
         r_data   <= {r_data[WIDTH_DATA-CCW-1:0], bdi_pad};
+        r_bdi_valid_bytes_all <= {r_bdi_valid_bytes_all[11:0], vbytes_sel};
+        if (!sel_pad | (bdi_rdy & bdi_valid_bytes[3]))
+            data_size <= cnt_di;
+    end
 
     if (bdi_rdy)
         r_is_msg <= (bdi_type == HDR_PT || bdi_type == HDR_CT) ? 1:0;
@@ -528,14 +528,12 @@ begin
         if (bdi_valid) begin
             ena_data   <= 1;
             bdi_rdy    <= 1;
-            if (bdi_valid_bytes[0]) begin
-                if (cnt_di == WORD_DATA-1)
-                    nst_di <= S_DI_WAIT;
-                else begin
-                    if (bdi_eot)
-                        nst_di <= S_DI_PAD_FULL;
-                    ena_cnt_di <= 1;
-                end
+            if (cnt_di == WORD_DATA-1)
+                nst_di <= S_DI_WAIT;
+            else if (bdi_valid_bytes[0]) begin
+                if (bdi_eot)
+                    nst_di <= S_DI_PAD_FULL;
+                ena_cnt_di <= 1;
             end else begin
                 ena_cnt_di  <= 1;
                 nst_di <= S_DI_PAD;
@@ -586,7 +584,7 @@ wire last;
 assign bdo             = r_dout[128-32 +: 32];
 assign bdo_valid       = bdo_vld;
 assign bdo_type        = "XXXX"; // not implemented. unused feature. See LWC implementer's guide.
-assign bdo_valid_bytes = r_dout_bytes;
+assign bdo_valid_bytes = (r_dout_end && (r_dout_words == 0)) ? r_dout_bytes : {4'hF} ;
 assign end_of_block    = last;
 assign msg_auth_valid  = msg_auth_vld;
 assign msg_auth        = r_msg_auth;
