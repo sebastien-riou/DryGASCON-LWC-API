@@ -8,12 +8,12 @@ module drygascon #(
 ) (
     input wire                  clk             ,
     input wire                  rst             ,
-    // --PreProcessor===============================================
+    // --PreProcessor==============================================
     // ----!key----------------------------------------------------
     input  wire [CCSW   -1:0]   key             ,
     input  wire                 key_valid       ,
     output wire                 key_ready       ,
-    // ----!Data----------------------------------------------------
+    // ----!Data---------------------------------------------------
     input  wire [CCW    -1:0]   bdi             ,
     input  wire                 bdi_valid       ,
     output wire                 bdi_ready       ,
@@ -168,9 +168,8 @@ wire        [WIDTH_C        -1:0]   mix_out;
 wire        [256            -1:0]   accu_out;
 
 assign pad = ~r_bdi_valid_bytes_all[0];
-// assign final_domain = r_bdi_eoi;
-assign final_domain = (r_bdi_type == HDR_HASH_MSG) ? 1 : r_bdi_eoi;  // temporary work around. r_bdi_eoi is not behaving as intended
-assign dsinfo = {domain, final_domain, pad};
+assign final_domain = r_bdi_eoi;
+assign dsinfo = (r_bdi_eot) ? {domain, final_domain, pad} : 0;
 assign gascon_in = (do_mix) ? mix_out : cc;
 
 
