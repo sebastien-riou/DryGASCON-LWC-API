@@ -111,8 +111,9 @@ localparam                      S_DI_INIT       = 0;
 localparam                      S_DI_KEYCHK     = 1;
 localparam                      S_DI_LDKEY      = 2;
 localparam                      S_DI_LD         = 3;
-localparam                      S_DI_PAD        = 4;
-localparam                      S_DI_WAIT       = 5;
+localparam                      S_DI_PAD_FULL   = 4;
+localparam                      S_DI_PAD        = 5;
+localparam                      S_DI_WAIT       = 6;
 
 
 reg         [4          -1:0]   st_di;
@@ -166,7 +167,7 @@ wire        [WIDTH_C        -1:0]   gascon_out;
 wire        [WIDTH_C        -1:0]   mix_out;
 wire        [256            -1:0]   accu_out;
 
-assign pad = ~r_bdi_valid_bytes[0];
+assign pad = ~r_bdi_valid_bytes_all[0];
 // assign final_domain = r_bdi_eoi;
 assign final_domain = (r_bdi_type == HDR_HASH_MSG) ? 1 : r_bdi_eoi;  // temporary work around. r_bdi_eoi is not behaving as intended
 assign dsinfo = {domain, final_domain, pad};
@@ -431,25 +432,25 @@ end // FSM Core
 // -------------------------------------------------------------------
 // FSM Input
 // -------------------------------------------------------------------
+reg                sel_full_pad;
 wire [CCW    -1:0] bdi_pad;
 wire [CCWdiv8-1:0] vbytes_sel;
+wire [CCWdiv8-1:0] bdi_pad_loc_sel;
 
 assign key_ready = key_rdy;
 assign bdi_ready = bdi_rdy;
 assign data_rdy = (st_di == S_DI_WAIT) ? 1:0;
 assign vbytes_sel = (sel_pad) ? 0 : bdi_valid_bytes;
+assign bdi_pad_loc_sel = (sel_pad) ? ((sel_full_pad) ? {4'b1000} : 0) : bdi_pad_loc;
 
 // Input padding logic
 generate
     for (i=0; i<CCWdiv8; i=i+1) begin
         assign bdi_pad[CCW-8*(i+1) +: 8] =
-                               (sel_pad) ? 0 :
-            (bdi_pad_loc[CCWdiv8-(i+1)]) ? 1 :
-            (bdi[CCW-8*(i+1) +: 8] & {8{bdi_valid_bytes[CCWdiv8-(i+1)]}});
+            bdi_pad_loc_sel[CCWdiv8-(i+1)] ? 1 :
+            (bdi[CCW-8*(i+1) +: 8] & {8{vbytes_sel[CCWdiv8-(i+1)]}});
     end
 endgenerate
-
-
 
 always @(posedge clk) begin
     if (rst_cnt_di) begin
@@ -474,7 +475,6 @@ always @(posedge clk) begin
         r_bdi_valid_bytes   <= bdi_valid_bytes;
         r_decrypt_in        <= decrypt_in;
         r_hash_in           <= hash_in;
-
     end
 
     if (ena_key)
@@ -496,6 +496,7 @@ begin
     bdi_rdy      <= 0;
     key_rdy      <= 0;
     sel_pad      <= 0;
+    sel_full_pad <= 0;
 
     case (st_di)
     S_DI_INIT: begin       // Initialization
@@ -526,21 +527,31 @@ begin
     S_DI_LD: begin
         if (bdi_valid) begin
             ena_data   <= 1;
-            bdi_rdy <= 1;
+            bdi_rdy    <= 1;
             if (bdi_valid_bytes[0]) begin
-                if ((bdi_type == HDR_NPUB)
-                        && (cnt_di == WORD_NPUB-1))
+                if (cnt_di == WORD_DATA-1)
                     nst_di <= S_DI_WAIT;
-                else if ((bdi_type == HDR_PT || bdi_type == HDR_CT || bdi_type == HDR_TAG)
-                            && (cnt_di == WORD_DATA-1))
-                    nst_di <= S_DI_WAIT;
-                else
+                else begin
+                    if (bdi_eot)
+                        nst_di <= S_DI_PAD_FULL;
                     ena_cnt_di <= 1;
+                end
             end else begin
                 ena_cnt_di  <= 1;
-                nst_di      <= S_DI_PAD;
+                nst_di <= S_DI_PAD;
             end
         end
+    end
+
+    S_DI_PAD_FULL: begin
+        sel_full_pad <= 1;
+        sel_pad    <= 1;
+        ena_cnt_di <= 1;
+        ena_data   <= 1;
+        if (cnt_di == WORD_DATA-1)
+            nst_di <= S_DI_WAIT;
+        else
+            nst_di <= S_DI_PAD;
     end
 
     S_DI_PAD: begin
@@ -579,7 +590,6 @@ assign bdo_valid_bytes = r_dout_bytes;
 assign end_of_block    = last;
 assign msg_auth_valid  = msg_auth_vld;
 assign msg_auth        = r_msg_auth;
-// assign last            = (r_dout_end && (r_dout_words == 0)) ? 1:0;
 assign last            = (r_dout_end && (r_dout_words == 0)) ? 1:0;
 
 always @(posedge clk) begin
