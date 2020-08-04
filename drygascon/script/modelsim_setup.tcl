@@ -1,5 +1,6 @@
 # -----------------------------------------------------------------------------
 # Setup
+set KAT_FOLDER "KAT"
 if [catch {set LAST_COMPILE_TIME}] {
     puts "Clearing time ..."
     set LAST_COMPILE_TIME 0
@@ -20,6 +21,13 @@ proc prep_work {} {
     ensure_lib         [subst $ns::WORK_LIB]
     vmap work          [subst $ns::WORK_LIB]
     uplevel #0 [list set LAST_COMPILE_TIME 0]
+    if {![file exists KAT]} {
+      puts "Creating KAT folder"
+      file mkdir KAT
+      file copy "../KAT/sdi.txt" "KAT/sdi.txt"
+      file copy "../KAT/pdi.txt" "KAT/pdi.txt"
+      file copy "../KAT/do.txt" "KAT/do.txt"
+    }    
     puts "...done"
 }
 
@@ -73,6 +81,11 @@ alias u {
 alias uu {
     source modelsim.tcl
     clean_work
+}
+
+alias q {
+    source modelsim.tcl
+    prep_work
 }
 
 alias cc {
