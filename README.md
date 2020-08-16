@@ -17,10 +17,11 @@ r
 
 ---
 
-Note: 
+Note:
 uu and r are cmd alias
 
 ---
 
 - Then Simulate->Run->Run-all for example.
 - To get waveforms: View->wave opens a waveform window. Select signals in the main window and add then using right click. Then the simulator can be controlled from the waveform window.
+- If "wave.do" is presented in the directory, user doesn't need to manually add the waveform. Note: "wave.do" can be clicking at the waveform windows select: File->"Save Format..."

@@ -28,3 +28,4 @@ f. output from hash             hash_tag
 
 D. Deviations from the LWC Hardware API v1.0 specification
 
+None

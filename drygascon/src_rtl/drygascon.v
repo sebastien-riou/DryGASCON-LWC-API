@@ -1,6 +1,5 @@
 `timescale 1ns / 1ps
 `default_nettype none
-
 module drygascon #(
     parameter                   CCW         = 32,
     parameter                   CCWdiv8     = 4 ,
@@ -76,7 +75,7 @@ localparam                      S_WAIT                  = 6;
 
 reg         [WIDTH_C    -1:0]   cc;
 reg         [WIDTH_X    -1:0]   xx;
-reg         [256        -1:0]   rr;
+reg         [128        -1:0]   rr;
 
 reg         [WIDTH_STATE-1:0]   state;
 reg         [WIDTH_STATE-1:0]   nstate;
@@ -94,6 +93,7 @@ reg                             sel_x;
 reg                             do_mix;
 reg                             sel_tag;
 reg                             sel_pad;
+reg                             shf_data;
 
 // ========= encoding
 localparam                      HDR_AD          = 4'b0001;
@@ -139,6 +139,7 @@ reg                             bdi_rdy;
 reg                             key_rdy;
 reg                             ena_key;
 reg                             ena_data;
+reg                             ld_dec_data;
 wire                            data_rdy;
 reg                             data_vld;
 
@@ -158,14 +159,14 @@ wire                                pad;
 wire                                final_domain;
 reg         [2              -1:0]   domain;
 wire        [4              -1:0]   dsinfo;
-wire        [WIDTH_DATA+4   -1:0]   ds_data; // {DSINFO, data}
 wire        [WIDTH_DATA     -1:0]   data_sel;
 wire        [WIDTH_DATA     -1:0]   dout;
 reg         [D_WIDTH        -1:0]   dd;
 wire        [WIDTH_C        -1:0]   gascon_in;
 wire        [WIDTH_C        -1:0]   gascon_out;
 wire        [WIDTH_C        -1:0]   mix_out;
-wire        [256            -1:0]   accu_out;
+wire        [128            -1:0]   accu_out;
+wire        [128            -1:0]   dec_data;
 
 assign pad = ~r_bdi_valid_bytes_all[0];
 assign final_domain = r_bdi_eoi;
@@ -176,37 +177,18 @@ assign gascon_in = (do_mix) ? mix_out : cc;
 `include "utils.vh"
 genvar i;
 
+assign dout     = swap_endian128(r_data) ^ rr;
+assign dec_data = r_data ^ swap_endian128(accu_out);
 generate
     for (i=0; i<WIDTH_DATA/8; i=i+1) begin
         assign data_sel[WIDTH_DATA-(i+1)*8 +: 8] =
-            (r_bdi_valid_bytes_all[WIDTH_DATA/8-i-1] & r_is_msg & r_decrypt_in) ?
-              dout[WIDTH_DATA-(i+1)*8 +: 8] :
+            (r_bdi_valid_bytes_all[i] & r_is_msg & r_decrypt_in) ?
+            dec_data[WIDTH_DATA-(i+1)*8 +: 8] :
             r_data[WIDTH_DATA-(i+1)*8 +: 8];
     end
 endgenerate
 
-assign ds_data = {dsinfo, swap_endian128(data_sel)};
-
-integer ii;
-always @(*) begin         // dd mux
-    case (rnd)
-        0      : dd <= ds_data[0*D_WIDTH +: D_WIDTH];
-        1      : dd <= ds_data[1*D_WIDTH +: D_WIDTH];
-        2      : dd <= ds_data[2*D_WIDTH +: D_WIDTH];
-        3      : dd <= ds_data[3*D_WIDTH +: D_WIDTH];
-        4      : dd <= ds_data[4*D_WIDTH +: D_WIDTH];
-        5      : dd <= ds_data[5*D_WIDTH +: D_WIDTH];
-        6      : dd <= ds_data[6*D_WIDTH +: D_WIDTH];
-        7      : dd <= ds_data[7*D_WIDTH +: D_WIDTH];
-        8      : dd <= ds_data[8*D_WIDTH +: D_WIDTH];
-        9      : dd <= ds_data[9*D_WIDTH +: D_WIDTH];
-        10     : dd <= ds_data[10*D_WIDTH +: D_WIDTH];
-        11     : dd <= ds_data[11*D_WIDTH +: D_WIDTH];
-        12     : dd <= ds_data[12*D_WIDTH +: D_WIDTH];
-        default: dd <= {8*{1'b0},
-                        ds_data[WIDTH_DATA+2 +: 2]} ;
-    endcase
-end
+assign dd = r_data[0*D_WIDTH +: D_WIDTH];
 
 always @(*) begin     // DOMAIN
     case(r_bdi_type)
@@ -228,7 +210,6 @@ assign accu_p1 = gascon_out[WIDTH_C-WIDTH_DATA +: WIDTH_DATA];          // [0..3
 assign accu_p2 = {gascon_out[WIDTH_C-2*WIDTH_DATA +: WIDTH_DATA-32],    // ([4..7] <<< 32)
                   gascon_out[WIDTH_C-WIDTH_DATA-32 +: 32]};
 assign accu_out = accu_p1 ^ accu_p2 ^ rr;
-assign dout = r_data ^ rr;
 
 
 
@@ -284,7 +265,7 @@ always @(posedge clk) begin
     if (ena_x) begin
         case (sel_x)
             0: xx <= r_key[WIDTH_KEY-DRYSPONGE_KEYSIZE*8-WIDTH_X +: WIDTH_X];
-            1: xx <= {128'hA4093822299F31D0082EFA98EC4E6C89};
+            1: xx <= {128'hA4093822299F31D0082EFA98EC4E6C89};   // Initialization
         endcase
     end
 
@@ -313,7 +294,7 @@ always @(posedge clk) begin
     end
 
     if (flag_tag_check)
-        r_msg_auth <= (rr == r_data) ? 1:0;
+        r_msg_auth <= (rr == swap_endian128(r_data)) ? 1:0;
 
     if (state == S_INIT)
         r_flag_squeeze <= 0;
@@ -336,9 +317,11 @@ begin
     ena_x   <= 0;
     sel_c   <= 0;
     sel_x    <= 0;
+    ld_dec_data <= 0;
     data_vld <= 0;
     do_mix   <= 0;
     dout_vld <= 0;
+    shf_data <= 0;
     flag_tag_check <= 0;
 
     // output
@@ -369,6 +352,7 @@ begin
             ena_c <= 1;
             if (rnd < DRYSPONGE_MPR_ROUNDS-1) begin
                 ena_rnd <= 1;
+                shf_data <= 1;
             end else begin
                 data_vld <= 1;
                 sel_c   <= 1;
@@ -387,12 +371,17 @@ begin
             ena_rnd <= 1;
         end else begin
             rst_rnd <= 1;
-            if (data_end)
+            if (data_end) begin
                 nstate <= S_TAG_OUT;
-            else if (data_rdy)
+            end else if (data_rdy) begin
+                if (r_is_msg & r_decrypt_in) begin
+                    ld_dec_data <= 1;
+                    rst_r       <= 1; // Don't need to keep R as we prepare the output already
+                end
                 nstate <= S_MIX;
-            else
+            end else begin
                 nstate <= S_WAIT_DATA;
+            end
         end
     end
 
@@ -457,8 +446,18 @@ always @(posedge clk) begin
         cnt_di <= cnt_di + 1;
     end
 
+    if (ld_dec_data) begin
+        r_data   <= data_sel;
+    end else if (ena_data) begin
+        r_data   <= {swap_endian32(bdi_pad), r_data[WIDTH_DATA-1:CCW]};
+    end else if (shf_data) begin
+        if (rnd == 0)
+            r_data  <= {6'b0, dsinfo, r_data[WIDTH_DATA-1:10]};
+        else
+            r_data  <= {10'b0, r_data[WIDTH_DATA-1:10]};
+    end
+
     if (ena_data) begin
-        r_data   <= {r_data[WIDTH_DATA-CCW-1:0], bdi_pad};
         r_bdi_valid_bytes_all <= {r_bdi_valid_bytes_all[11:0], vbytes_sel};
         if (!sel_pad | (bdi_rdy & bdi_valid_bytes[3]))
             data_size <= cnt_di;
