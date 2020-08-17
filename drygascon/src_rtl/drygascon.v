@@ -38,40 +38,37 @@ module drygascon #(
 );
 
 // Algorithm parameters
-localparam                      SIZE_KEY        = 256;
-localparam                      SIZE_NPUB       = 128;
-localparam                      SIZE_DATA       = 128;
+localparam                      SIZE_KEY                  = 256;
+localparam                      SIZE_NPUB                 = 128;
+localparam                      SIZE_DATA                 = 128;
 
-
-localparam                      D_WIDTH                     = 10;
-localparam                      DRYSPONGE_ROUNDS            = 8-1;
-localparam                      DRYSPONGE_INIT_ROUNDS       = 12-1;
-localparam                      DRYSPONGE_MPR_ROUNDS        = (SIZE_DATA+4+D_WIDTH)/D_WIDTH; // 14
-localparam                      DRYSPONGE_KEYSIZE           = 16;
-localparam                      DRYSPONGE_CAPACITYSIZE64    = 5;
-
-
+localparam                      D_WIDTH                   = 10;
+localparam                      DRYSPONGE_ROUNDS          = 8-1;
+localparam                      DRYSPONGE_INIT_ROUNDS     = 12-1;
+localparam                      DRYSPONGE_MPR_ROUNDS      = (SIZE_DATA+4+D_WIDTH)/D_WIDTH; // 14
+localparam                      DRYSPONGE_KEYSIZE         = 16;
+localparam                      DRYSPONGE_CAPACITYSIZE64  = 5;
 
 // Design/derived parameters
-localparam                      NW              = DRYSPONGE_CAPACITYSIZE64;
-localparam                      WIDTH_KEY       = SIZE_KEY;
-localparam                      WIDTH_DATA      = SIZE_DATA;
-localparam                      WORD_KEY        = SIZE_KEY/CCSW;
-localparam                      WORD_NPUB       = SIZE_NPUB/CCW;
-localparam                      WORD_DATA       = SIZE_DATA/CCW;
+localparam                      NW                        = DRYSPONGE_CAPACITYSIZE64;
+localparam                      WIDTH_KEY                 = SIZE_KEY;
+localparam                      WIDTH_DATA                = SIZE_DATA;
+localparam                      WORD_KEY                  = SIZE_KEY/CCSW;
+localparam                      WORD_NPUB                 = SIZE_NPUB/CCW;
+localparam                      WORD_DATA                 = SIZE_DATA/CCW;
 
 
-// ========= Main
-localparam                      WIDTH_C                 = 64*NW;
-localparam                      WIDTH_X                 = 128;
-localparam                      WIDTH_STATE             = 3;
-localparam                      S_INIT                  = 0;
-localparam                      S_KS                    = 1;
-localparam                      S_MIX                   = 2;
-localparam                      S_GASCON                = 3;
-localparam                      S_TAG_OUT               = 4;
-localparam                      S_WAIT_DATA             = 5;
-localparam                      S_WAIT                  = 6;
+// ========= Main FSM
+localparam                      WIDTH_C                   = 64*NW;
+localparam                      WIDTH_X                   = 128;
+localparam                      WIDTH_STATE               = 3;
+localparam                      S_INIT                    = 0;
+localparam                      S_KS                      = 1;
+localparam                      S_MIX                     = 2;
+localparam                      S_GASCON                  = 3;
+localparam                      S_TAG_OUT                 = 4;
+localparam                      S_WAIT_DATA               = 5;
+localparam                      S_WAIT                    = 6;
 
 reg         [WIDTH_C    -1:0]   cc;
 reg         [WIDTH_X    -1:0]   xx;
@@ -87,7 +84,6 @@ reg                             rst_r;
 reg                             ena_c;
 reg                             ena_x;
 reg                             ena_r;
-// reg                             sel_g;
 reg         [2          -1:0]   sel_c;
 reg                             sel_x;
 reg                             do_mix;
@@ -149,7 +145,6 @@ localparam                      S_DO_OUT        = 1;
 localparam                      S_DO_MSGAUTH    = 2;
 reg         [2          -1:0]   st_do;
 reg         [2          -1:0]   nst_do;
-
 reg                             ena_dout;
 
 // -------------------------------------------------------------------
@@ -168,16 +163,24 @@ wire        [WIDTH_C        -1:0]   mix_out;
 wire        [128            -1:0]   accu_out;
 wire        [128            -1:0]   dec_data;
 
-assign pad = ~r_bdi_valid_bytes_all[0];
-assign final_domain = r_bdi_eoi;
-assign dsinfo = (r_bdi_eot) ? {domain, final_domain, pad} : 0;
-assign gascon_in = (do_mix) ? mix_out : cc;
-
-
 `include "utils.vh"
-genvar i;
 
-assign dout     = swap_endian128(r_data) ^ rr;
+// ==== DSINFO
+assign pad          = ~r_bdi_valid_bytes_all[0];
+assign final_domain = r_bdi_eoi;
+always @(*) begin     // DOMAIN
+    case(r_bdi_type)
+        HDR_NPUB:     domain <= 1;
+        HDR_HASH_MSG: domain <= 2;
+        HDR_AD  :     domain <= 2;
+        default:      domain <= 3;
+    endcase
+end
+assign dsinfo       = (r_bdi_eot) ? {domain, final_domain, pad} : 0;
+
+
+// ==== Mix
+genvar i;
 assign dec_data = r_data ^ swap_endian128(accu_out);
 generate
     for (i=0; i<WIDTH_DATA/8; i=i+1) begin
@@ -187,31 +190,28 @@ generate
             r_data[WIDTH_DATA-(i+1)*8 +: 8];
     end
 endgenerate
-
 assign dd = r_data[0*D_WIDTH +: D_WIDTH];
 
-always @(*) begin     // DOMAIN
-    case(r_bdi_type)
-        HDR_NPUB: domain <= 1;
-        HDR_HASH_MSG: domain <= 2;
-        HDR_AD  : domain <= 2;
-        default:  domain <= 3;
-    endcase
-end
+mix32        u_mix32(.out(mix_out), .c(cc), .x(xx), .d(dd));
 
-assign rnd_gascon = (do_mix) ? 0 : rnd;
+
+// ==== Gascon
+assign gascon_in  = (do_mix) ? mix_out : cc;
+assign rnd_gascon = (do_mix) ?       0 : rnd;
 
 gascon_round u_gascon_round(.out(gascon_out), .din(gascon_in), .round(rnd_gascon));
-mix32        u_mix32(.out(mix_out), .c(cc), .x(xx), .d(dd));
-// accumulate
+
+
+// ==== Accumulate
 wire [128-1:0] accu_p1;
 wire [128-1:0] accu_p2;
-assign accu_p1 = gascon_out[WIDTH_C-WIDTH_DATA +: WIDTH_DATA];          // [0..3]
-assign accu_p2 = {gascon_out[WIDTH_C-2*WIDTH_DATA +: WIDTH_DATA-32],    // ([4..7] <<< 32)
-                  gascon_out[WIDTH_C-WIDTH_DATA-32 +: 32]};
+assign accu_p1  = gascon_out[WIDTH_C-WIDTH_DATA +: WIDTH_DATA];          // [0..3]
+assign accu_p2  = {gascon_out[WIDTH_C-2*WIDTH_DATA +: WIDTH_DATA-32],    // ([4..7] <<< 32)
+                   gascon_out[WIDTH_C-WIDTH_DATA-32 +: 32]};
 assign accu_out = accu_p1 ^ accu_p2 ^ rr;
 
-
+// ==== Output
+assign dout     = swap_endian128(r_data) ^ rr;
 
 
 // -------------------------------------------------------------------
@@ -302,26 +302,22 @@ always @(posedge clk) begin
         r_flag_squeeze <= 1;
 end
 
-// FSM Core
-
 always @(*)
 begin
-    nstate  <= state;
-    rst_rnd <= 0;
-    ena_rnd <= 0;
-
-    ena_r   <= 0;
-    rst_r   <= 0;
-
-    ena_c   <= 0;
-    ena_x   <= 0;
-    sel_c   <= 0;
-    sel_x    <= 0;
+    nstate      <= state;
+    rst_rnd     <= 0;
+    ena_rnd     <= 0;
+    ena_r       <= 0;
+    rst_r       <= 0;
+    ena_c       <= 0;
+    ena_x       <= 0;
+    sel_c       <= 0;
+    sel_x       <= 0;
     ld_dec_data <= 0;
-    data_vld <= 0;
-    do_mix   <= 0;
-    dout_vld <= 0;
-    shf_data <= 0;
+    data_vld    <= 0;
+    do_mix      <= 0;
+    dout_vld    <= 0;
+    shf_data    <= 0;
     flag_tag_check <= 0;
 
     // output
@@ -424,18 +420,17 @@ wire [CCW    -1:0] bdi_pad;
 wire [CCWdiv8-1:0] vbytes_sel;
 wire [CCWdiv8-1:0] bdi_pad_loc_sel;
 
-assign key_ready = key_rdy;
-assign bdi_ready = bdi_rdy;
-assign data_rdy = (st_di == S_DI_WAIT) ? 1:0;
-assign vbytes_sel = (sel_pad) ? 0 : bdi_valid_bytes;
+assign key_ready       = key_rdy;
+assign bdi_ready       = bdi_rdy;
+assign data_rdy        = (st_di == S_DI_WAIT) ? 1:0;
+assign vbytes_sel      = (sel_pad) ? 0 : bdi_valid_bytes;
 assign bdi_pad_loc_sel = (sel_pad) ? ((sel_full_pad) ? {4'b1000} : 0) : bdi_pad_loc;
 
 // Input padding logic
 generate
     for (i=0; i<CCWdiv8; i=i+1) begin
         assign bdi_pad[CCW-8*(i+1) +: 8] =
-            bdi_pad_loc_sel[CCWdiv8-(i+1)] ? 1 :
-            (bdi[CCW-8*(i+1) +: 8] & {8{vbytes_sel[CCWdiv8-(i+1)]}});
+            bdi_pad_loc_sel[CCWdiv8-(i+1)] ? 1 : (bdi[CCW-8*(i+1) +: 8] & {8{vbytes_sel[CCWdiv8-(i+1)]}});
     end
 endgenerate
 

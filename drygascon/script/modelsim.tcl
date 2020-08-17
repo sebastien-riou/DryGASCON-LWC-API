@@ -5,7 +5,6 @@ set LWC_PATH       [file normalize [subst "$ROOT_PATH/submodules/github/LWC"]]
 set RUN_TIME "1000 ns"
 
 set src_rtl [subst {
-    "$DRYGASCON_PATH/Implementations/crypto_aead/drygascon128/add_verilog/drygascon128_1round_cycle/drygascon128_ACC_PIPE_MIX_SHIFT_REG.v"
     "$RTL_PATH/mix32.v"
     "$RTL_PATH/gascon_round.v"
     "$RTL_PATH/drygascon.v"
