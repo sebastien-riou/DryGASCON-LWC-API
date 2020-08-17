@@ -27,7 +27,7 @@ proc prep_work {} {
       file copy "../KAT/sdi.txt" "KAT/sdi.txt"
       file copy "../KAT/pdi.txt" "KAT/pdi.txt"
       file copy "../KAT/do.txt" "KAT/do.txt"
-    }    
+    }
     puts "...done"
 }
 
@@ -95,7 +95,9 @@ alias cc {
 
 alias sim {
     vsim -gui -t ps -L work -gG_FNAME_PDI="KAT/pdi.txt" -gG_FNAME_SDI="KAT/sdi.txt" -gG_FNAME_DO="KAT/do.txt" lwc_tb
-    do wave.do
+    if {[file isfile wave.do]} {
+      do wave.do
+    }
     run $RUN_TIME
 }
 
