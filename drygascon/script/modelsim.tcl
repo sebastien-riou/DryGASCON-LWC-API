@@ -5,6 +5,7 @@ set LWC_PATH       [file normalize [subst "$ROOT_PATH/submodules/github/LWC"]]
 set RUN_TIME "1000 ns"
 
 set src_rtl [subst {
+    "$RTL_PATH/birotr.v"
     "$RTL_PATH/mix32.v"
     "$RTL_PATH/gascon_round.v"
     "$RTL_PATH/drygascon.v"
