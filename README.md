@@ -1,4 +1,4 @@
-# DryGASCON-GMU
+# DryGASCON-LWC-API
 Hardware implementation of [DryGASCON](https://github.com/sebastien-riou/DryGASCON)128 compliant with [Lightweight Cryptography](https://csrc.nist.gov/projects/lightweight-cryptography) (LWC) [hardware API](https://cryptography.gmu.edu/athena/index.php?id=LWC).
 
 
