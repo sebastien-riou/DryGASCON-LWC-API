@@ -156,7 +156,7 @@ reg         [2              -1:0]   domain;
 wire        [4              -1:0]   dsinfo;
 wire        [WIDTH_DATA     -1:0]   data_sel;
 wire        [WIDTH_DATA     -1:0]   dout;
-reg         [D_WIDTH        -1:0]   dd;
+wire        [D_WIDTH        -1:0]   dd;
 wire        [WIDTH_C        -1:0]   gascon_in;
 wire        [WIDTH_C        -1:0]   gascon_out;
 wire        [WIDTH_C        -1:0]   mix_out;
@@ -183,7 +183,7 @@ assign dsinfo       = (r_bdi_eot) ? {domain, final_domain, pad} : 0;
 genvar i;
 assign dec_data = r_data ^ swap_endian128(accu_out);
 generate
-    for (i=0; i<WIDTH_DATA/8; i=i+1) begin
+    for (i=0; i<WIDTH_DATA/8; i=i+1) begin : gen_data_sel
         assign data_sel[WIDTH_DATA-(i+1)*8 +: 8] =
             (r_bdi_valid_bytes_all[i] & r_is_msg & r_decrypt_in) ?
             dec_data[WIDTH_DATA-(i+1)*8 +: 8] :
@@ -428,7 +428,7 @@ assign bdi_pad_loc_sel = (sel_pad) ? ((sel_full_pad) ? {4'b1000} : 0) : bdi_pad_
 
 // Input padding logic
 generate
-    for (i=0; i<CCWdiv8; i=i+1) begin
+    for (i=0; i<CCWdiv8; i=i+1) begin : gen_pad_lock_sel
         assign bdi_pad[CCW-8*(i+1) +: 8] =
             bdi_pad_loc_sel[CCWdiv8-(i+1)] ? 1 : (bdi[CCW-8*(i+1) +: 8] & {8{vbytes_sel[CCWdiv8-(i+1)]}});
     end
