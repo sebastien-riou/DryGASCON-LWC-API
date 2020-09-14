@@ -227,7 +227,7 @@ reg                                 data_end;
 reg         [2              -1:0]   data_size;
 
 reg                                 dout_vld;
-reg                                 dout_rdy;
+wire                                dout_rdy;
 reg                                 flag_tag_check;
 reg                                 r_flag_squeeze;
 
@@ -590,16 +590,16 @@ always @(posedge clk) begin
         st_do <= nst_do;
 end
 
+
+assign dout_rdy = (st_do == S_DO_WAIT) ? 1:0;
 always @(*) begin
     nst_do <= st_do;
-    dout_rdy <= 0;
     ena_dout <= 0;
     msg_auth_vld <= 0;
     bdo_vld  <= 0;
 
     case (st_do)
     S_DO_WAIT: begin
-        dout_rdy <= 1;
         if (flag_tag_check)
             nst_do <= S_DO_MSGAUTH;
         else if (dout_vld)
