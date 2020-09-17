@@ -41,10 +41,10 @@ f. Execution times
 
 * Execution time of authenticated encryption:
 
-    * IL   = 8
+    * IL   = 20
     * KS   = 1
     * INIT = 25
-    * BLK  = 20
+    * BLK  = 21
     * OUT  = 5
 
     IL + KS + INIT + (BLK * Na) + (BLK * Nm) + OUT
@@ -52,20 +52,19 @@ f. Execution times
 
 * Execution time of authenticated decryption:
 
-    * IL   = 8
+    * IL   = 20
     * KS   = 1
     * INIT = 25
-    * BLK  = 20
-    * OUT  = 1
+    * BLK  = 21
+    * OUT  = 2
 
     IL + KS + INIT + (BLK * Na) + (BLK * Nc) + OUT
 
 * Execution time of hashing:
 
-    * IL   = 4
+    * IL   = 10
     * KS   = 1
-    * INIT = 25
-    * BLK  = 20
+    * BLK  = 21
     * G    = 7
     * OUT  = 5
 
