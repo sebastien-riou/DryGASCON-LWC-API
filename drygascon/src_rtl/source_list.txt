@@ -1,0 +1,15 @@
+mix32.v
+gascon_round.v
+drygascon.v
+design_pkg.vhd
+CryptoCore.vhd
+../../submodules/github/LWC/hardware/LWCsrc/fwft_fifo.vhd
+../../submodules/github/LWC/hardware/LWCsrc/NIST_LWAPI_pkg.vhd
+../../submodules/github/LWC/hardware/LWCsrc/key_piso.vhd
+../../submodules/github/LWC/hardware/LWCsrc/data_piso.vhd
+../../submodules/github/LWC/hardware/LWCsrc/data_sipo.vhd
+../../submodules/github/LWC/hardware/LWCsrc/StepDownCountLd.vhd
+../../submodules/github/LWC/hardware/LWCsrc/PreProcessor.vhd
+../../submodules/github/LWC/hardware/LWCsrc/PostProcessor.vhd
+../../submodules/github/LWC/hardware/LWCsrc/std_logic_1164_additions.vhd
+../../submodules/github/LWC/hardware/LWCsrc/LWC.vhd

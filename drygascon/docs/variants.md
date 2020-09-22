@@ -71,14 +71,6 @@ f. Execution times
     IL + KS + (BLK * Nh) + G + OUT
 
 
+g. Difference between execution times for a new key and the same key
 
-g. Latencies
-Latency of authenticated encryption:
-20
-
-Latency of authenticated decryption:
-20
-
-h. Difference between execution times for a new key and the same key
-
-4
+11
