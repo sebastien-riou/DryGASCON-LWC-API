@@ -1,4 +1,5 @@
 mix32.v
+birotr.v
 gascon_round.v
 drygascon.v
 design_pkg.vhd
